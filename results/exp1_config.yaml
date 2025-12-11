@@ -29,7 +29,11 @@ ann:
 
   moons:
     <<: *small_defaults
+    HIDDEN_LAYER_SIZE: [8, 6, 8]
   circles:
+    <<: *small_defaults
+    HIDDEN_LAYER_SIZE: [10, 8]
+  squares:
     <<: *small_defaults
     HIDDEN_LAYER_SIZE: [8, 4]
   corr:
@@ -80,6 +84,8 @@ pm:
   moons:
     <<: *small_defaults_pm
   circles:
+    <<: *small_defaults_pm
+  sqaures:
     <<: *small_defaults_pm
   corr:
     <<: *small_defaults_pm

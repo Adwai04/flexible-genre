@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class PairData(Dataset):
@@ -287,7 +288,7 @@ class StochasticPairsNegSamp(Dataset):
 
 class StochasticPairsImmut(Dataset):
 
-    def __init__(self, src_X, tgt_X, src_y, tgt_y, immutable_mask,lambda_=0.9, k=2, p=2):
+    def __init__(self, src_X, tgt_X, src_y, tgt_y, immutable_mask,lambda_=0.9, k=2, p=2, w=[1.0, 1.0]):
         self.src_X = src_X
         self.src_y = src_y
         self.tgt_X = tgt_X
@@ -299,14 +300,19 @@ class StochasticPairsImmut(Dataset):
         self.k = k
         self.p = p
         self.lambda_ = lambda_
+
         if torch.all(torch.tensor(immutable_mask)):
             self.immutable_mask = None
         else:
             self.immutable_mask = immutable_mask
-        self.create_pairs()
+        self.create_pairs(w)
 
-    def create_pairs(self):
-        D = torch.cdist(self.src_X, self.tgt_X, p=self.p)
+    def create_pairs(self, cost_weights):
+        # D = torch.cdist(self.src_X, self.tgt_X, p=self.p)
+        cost_weights = torch.tensor(cost_weights)
+        cost_weights /= torch.sum(cost_weights)
+        diff = (self.src_X[:, None, :] - self.tgt_X[None, :, :]).abs()  # shape: [N_src, N_tgt, D]
+        D = ((diff ** self.p) * cost_weights[None, None, :]).sum(dim=-1) ** (1 / self.p)
 
         expD = torch.exp(-self.lambda_ * D)
 
@@ -340,3 +346,100 @@ class StochasticPairsImmut(Dataset):
             "pair_x": self.tgt_X[pair_id],
             "pair_y": self.tgt_y[pair_id],
         }
+
+
+class StochasticPairsImmutFlexible(Dataset):
+
+    def __init__(self, src_X, tgt_X, src_y, tgt_y,lambda_=0.9, num_samples=10000, n_bins=50, epsilon=1e-13):
+        N, D = src_X.shape
+        self.src_X = src_X
+        self.src_y = src_y
+        self.tgt_X = tgt_X
+        self.tgt_y = tgt_y
+        self.num_samples = num_samples
+        self.priors = torch.zeros(D, n_bins)
+        self.dim = D
+        self.epsilon = epsilon
+        self.bin_centers = None
+        
+        #Counting based priors (Naive Bayes fuj)
+        bins = torch.linspace(0, 1, n_bins + 1)
+        self.bin_centers = 0.5 * (bins[:-1] + bins[1:])
+        self.bin_width = bins[1] - bins[0]
+
+        for j in range(D):
+            idx = torch.bucketize(src_X[:, j], bins, right=False) - 1
+            idx = torch.clamp(idx, 0, n_bins - 1)
+            counts = torch.bincount(idx, minlength=n_bins).float()
+            self.priors[j] = counts / counts.sum()
+
+        # self.plot_and_save_priors_heatmap()
+
+        self.lambda_ = lambda_
+        self.pair_X = None
+        self.pair_r = None
+        self.pair_a = None
+        self.create_pairs()
+        
+    def create_pairs(self):
+        bin_width = self.bin_width
+    
+        pairs_x, pairs_r, pairs_a = [], [], []
+    
+        for _ in range(self.num_samples):
+            idx = torch.randint(0, self.tgt_X.shape[0], (1,))
+            x_plus = self.tgt_X[idx].squeeze(0) 
+            a = torch.rand(self.dim)
+            a = a / a.sum()
+    
+            r = torch.zeros(self.dim)
+    
+            for j in range(self.dim):
+                cj = a[j] * torch.abs(x_plus[j] - self.bin_centers)
+                w = (torch.exp(- self.lambda_ * cj) + self.epsilon) * self.priors[j]
+                p = w / w.sum()
+                u_idx = torch.multinomial(p, 1).item()
+                r_j = self.bin_centers[u_idx]
+                noise = torch.randn(1) * (bin_width / 8)
+                r[j] = r_j + noise
+    
+            pairs_x.append(x_plus)
+            pairs_r.append(r)
+            pairs_a.append(a)
+    
+        self.pair_X = torch.stack(pairs_x)
+        self.pair_r = torch.stack(pairs_r)
+        self.pair_a = torch.stack(pairs_a)
+
+    def __getitem__(self, idx):
+        return {
+            "pair_x": self.pair_X[idx],
+            "x": self.pair_r[idx],
+            "weights": self.pair_a[idx],
+            "y": 0,
+            "pair_y" : 1,
+            
+        }
+
+    def __len__(self):
+        return self.num_samples
+    
+    def plot_and_save_priors_heatmap(self, save_path="priors_heatmap.png"):
+        """
+        Draw and save a heatmap of self.priors tensor.
+        Each row corresponds to a dimension and each column to a bin.
+        """
+        priors = self.priors.detach().cpu()  # ensure it's on CPU and detached from autograd
+
+        plt.figure(figsize=(8, 5))
+        im = plt.imshow(priors, cmap="viridis", aspect="auto", origin="lower")
+        plt.colorbar(im, label="Prior value")
+        plt.xlabel("Bins")
+        plt.ylabel("Dimensions")
+        plt.title("Heatmap of self.priors")
+
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300)
+        plt.close()
+
+        print(f"✅ Heatmap saved to {save_path}")

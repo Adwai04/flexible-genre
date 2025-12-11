@@ -169,6 +169,12 @@ def load_dataset(
         train_X = (train_X - train_mean) / train_std
         test_X = (test_X - train_mean) / train_std
 
+        # import matplotlib.pyplot as plt
+        # plt.scatter(X[y == 0, 0], X[y == 0, 1], color='red')  
+        # plt.scatter(X[y == 1, 0], X[y == 1, 1], color='blue')   
+        # plt.legend(['Negative', 'Positive'])
+        # plt.savefig('concentric_circles.png')
+
     elif DATASET in ["moons"]:
         SEED = 42
         utils.set_seed(SEED)
@@ -188,6 +194,96 @@ def load_dataset(
         train_std = np.std(train_X, axis=0)
         train_X = (train_X - train_mean) / train_std
         test_X = (test_X - train_mean) / train_std
+
+    elif DATASET in ["squares"]:
+        SEED = 42
+        utils.set_seed(SEED)
+        TEST_TRAIN_SPLIT = 0.1
+        N_SAMPLES = 2500
+        NOISE_STD = 0.05
+        SIZE_RATIO = 0.5  # inner to outer square ratio
+
+        def generate_square_outer_perimeter(n, side_length):
+            r = side_length / 2
+            points = []
+            for _ in range(n):
+                side = np.random.randint(0, 4)
+                if side == 0:  # bottom
+                    x = np.random.uniform(-r, r)
+                    y = -r
+                elif side == 1:  # top
+                    x = np.random.uniform(-r, r)
+                    y = r
+                elif side == 2:  # left
+                    x = -r
+                    y = np.random.uniform(-r, r)
+                elif side == 3:  # right
+                    x = r
+                    y = np.random.uniform(-r, r)
+                points.append([x, y])
+            return np.array(points)
+        def generate_square_inner_perimeter(n, side_length):
+            r = side_length / 2
+            points = []
+            for _ in range(n):
+                side = np.random.randint(0, 4)
+                if side == 0:  # bottom
+                    x = np.random.uniform(-r, r)
+                    y = np.random.uniform(-r, r)
+                elif side == 1:  # top
+                    x = np.random.uniform(-r, r)
+                    y = np.random.uniform(-r, r)
+                elif side == 2:  # left
+                    # x = -r
+                    y = np.random.uniform(-r, r)
+                    x = np.random.uniform(-r, r)
+                elif side == 3:  # right
+                    x = np.random.uniform(-r, r)
+                    y = np.random.uniform(-r, r)
+                points.append([x, y])
+            return np.array(points)
+
+        inner_points = generate_square_inner_perimeter(N_SAMPLES // 2, side_length=2 * SIZE_RATIO)
+        outer_points = generate_square_outer_perimeter(N_SAMPLES // 2, side_length=2)
+
+        inner_points += np.random.normal(0, NOISE_STD, inner_points.shape)
+        outer_points += np.random.normal(0, NOISE_STD, outer_points.shape)
+        # inner_points += 0.5
+        # outer_points += 0.5
+        X = np.vstack((inner_points, outer_points)).astype(np.float32)
+        y = np.hstack((np.zeros(N_SAMPLES // 2), np.ones(N_SAMPLES // 2))).astype(np.float32)
+
+        
+
+        perm = np.random.permutation(N_SAMPLES)
+        X = X[perm]
+        y = y[perm]
+
+        train_X, test_X, train_y, test_y = train_test_split(
+            X, y, test_size=TEST_TRAIN_SPLIT, random_state=SEED
+        )
+
+        train_y = 1.0 * train_y
+        test_y = 1.0 * test_y
+
+        train_mean = np.mean(train_X, axis=0)
+        train_std = np.std(train_X, axis=0)
+        # data_dict["mean"] = train_mean.to_numpy(np.float32)
+        # data_dict["std"] = train_std.to_numpy(np.float32)
+        train_X = (train_X - train_mean) / train_std
+        test_X = (test_X - train_mean) / train_std
+        
+        # import matplotlib.pyplot as plt
+
+        # # X_mean = np.mean(X, axis=0)
+        # # X_std = np.std(X,axis)
+        # # X_normalized = np.mean(X,a)
+
+        # # Create a scatter plot
+        # plt.scatter(X[y == 0, 0], X[y == 0, 1], color='red')  
+        # plt.scatter(X[y == 1, 0], X[y == 1, 1], color='blue')   
+        # plt.legend(['Negative', 'Positive'])
+        # plt.savefig('concentric_squares.png')
 
     elif DATASET in ["corr"]:
         SEED = 42

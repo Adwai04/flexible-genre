@@ -14,6 +14,24 @@ import torch.nn as nn
 import models.binnedpm as bpm
 from data.pair_data import StochasticPairsImmut
 import time
+import numpy as np
+
+def save_pairs(dataset, save_path="training_pairs.npz", n_samples=None):
+    if n_samples is None:
+        n_samples = len(dataset)
+
+    x_minus_list, x_plus_list = [], []
+
+    for i in range(n_samples):
+        sample = dataset[i]
+        x_minus_list.append(sample["x"].cpu().numpy())       # convert from torch tensor to numpy
+        x_plus_list.append(sample["pair_x"].cpu().numpy())
+
+    x_minus_list = np.array(x_minus_list)
+    x_plus_list = np.array(x_plus_list)
+
+    np.savez(save_path, x_minus=x_minus_list, x_plus=x_plus_list)
+    print(f"Saved {n_samples} pairs to '{save_path}'")
 
 if __name__ == "__main__":
 
@@ -27,7 +45,7 @@ if __name__ == "__main__":
     # parser.add_argument('--ystar', type=int,required=True, help='desired label')
     parser.add_argument('--device', type=int,required=True, help='device to train on')
     parser.add_argument('--tlamb', nargs='+',required=True, type=float)
-    parser.add_argument('--perc', nargs='+',required=True, type=float)  
+    parser.add_argument('--perc', nargs='+',required=False, type=float)  
     args = parser.parse_args()
 
     exp_config = utils.load_config('results/exp1_config.yaml')
@@ -67,32 +85,49 @@ if __name__ == "__main__":
             train_Dtgt_y = train_y[(train_pred == YSTAR) & (train_y == YSTAR)]
 
             print('target: ',len(train_Dtgt_X), 'src', len(train_Dsrc_X))
+            print(immutable_mask)
+            cost_weights = [0.9, 0.1]
+            cost_weights_str = f"{cost_weights[0]:.1f}_{cost_weights[1]:.1f}"
+            print(cost_weights_str)
             # paired_data = StochasticPairs(train_Dsrc_X,train_Dtgt_X,train_Dsrc_y,train_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P)
 
             # pair_data_train, pair_data_val = torch.utils.data.random_split(paired_data, [int(0.9*len(paired_data)), len(paired_data) - int(0.9*len(paired_data))], generator=torch.Generator().manual_seed(SEED))
 
             train_Dsrc_X,train_Dsrc_y,val_Dsrc_X,val_Dsrc_y = utils.split_data(train_Dsrc_X,train_Dsrc_y,0.9)
             train_Dtgt_X,train_Dtgt_y,val_Dtgt_X,val_Dtgt_y = utils.split_data(train_Dtgt_X,train_Dtgt_y,0.9)
-            paired_data_train = StochasticPairsImmut(train_Dsrc_X,train_Dtgt_X,train_Dsrc_y,train_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P)
-            paired_data_val = StochasticPairsImmut(val_Dsrc_X,val_Dtgt_X,val_Dsrc_y,val_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P)
+            paired_data_train = StochasticPairsImmut(train_Dsrc_X,train_Dtgt_X,train_Dsrc_y,train_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P, w=cost_weights)
+            paired_data_val = StochasticPairsImmut(val_Dsrc_X,val_Dtgt_X,val_Dsrc_y,val_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P, w=cost_weights)
+
+            save_pairs(paired_data_train)
 
 
             test_Dsrc_X = test_X[test_pred == (1 - YSTAR)]
             test_Dtgt_X = test_X[(test_pred == YSTAR) & (test_y == YSTAR)]
             test_Dsrc_y = test_y[test_pred == (1 - YSTAR)]
             test_Dtgt_y = test_y[(test_pred == YSTAR) & (test_y == YSTAR)]
-            paired_data_test = StochasticPairsImmut(test_Dsrc_X,test_Dtgt_X,test_Dsrc_y,test_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P,)
+            paired_data_test = StochasticPairsImmut(test_Dsrc_X,test_Dtgt_X,test_Dsrc_y,test_Dtgt_y,immutable_mask,lambda_=train_lambda,k=TOP_K,p=TRAIN_P, w=cost_weights)
 
             # heloc, compas-all, adult-all
-            pair_model = bpm.PairedTransformerBinned(n_bins=50,
-                                                num_inputs=INPUT_SHAPE,
-                                                num_labels=1,
-                                                num_encoder_layers=16,
-                                                num_decoder_layers=16,
-                                                emb_size=32,
-                                                nhead=8,
-                                                dim_feedforward = 32,
-                                                dropout= 0.1).to(DEVICE)
+            # pair_model = bpm.PairedTransformerBinned(n_bins=50,
+            #                                     num_inputs=INPUT_SHAPE,
+            #                                     num_labels=1,
+            #                                     num_encoder_layers=16,
+            #                                     num_decoder_layers=16,
+            #                                     emb_size=32,
+            #                                     nhead=8,
+            #                                     dim_feedforward = 32,
+            #                                     dropout= 0.1).to(DEVICE)
+            pair_model = bpm.PairedTransformerBinned(
+                                                        n_bins=50,                # Keep as is — fine resolution for continuous features
+                                                        num_inputs=2,             # Since your data is 2D
+                                                        num_labels=1,             # Binary classification
+                                                        num_encoder_layers=2,     # Only 2 encoder layers are sufficient
+                                                        num_decoder_layers=2,     # 2 decoder layers for similar capacity
+                                                        emb_size=16,              # Smaller embedding (reduces overfitting)
+                                                        nhead=2,                  # 2 heads => each head gets 8-dim subspace
+                                                        dim_feedforward=64,       # Slightly higher than emb_size, stable transformer FF
+                                                        dropout=0.1               # Regularization, fine for small data
+                                                    ).to(DEVICE)
 
             for p in pair_model.parameters():
                     if p.dim() > 1:
@@ -105,6 +140,15 @@ if __name__ == "__main__":
 
             num_epochs = 2000
             batch_size= 8192 * 2 if DATASET_STR=='adult-all' else 2048
+            if DATASET_STR=='squares':
+                batch_size = 1024
+                num_epochs = 1 #4000 #2000
+            elif DATASET_STR=='circles':
+                batch_size = 1024
+                num_epochs = 4000 #2000
+            elif DATASET_STR=='moons':
+                batch_size = 1024
+                num_epochs = 1000 #2000
             print('bs: ',batch_size,'num epochs: ',num_epochs)
             learning_rate = 0.0001
             eval_freq = 10
@@ -148,7 +192,7 @@ if __name__ == "__main__":
             best_state.update(loss_log)
 
             PM_OUTDIR = f'./saved_models/genre/{DATASET_STR}_gamma{gamma}/'
-            PM_STATE_PATH  = f'{PM_OUTDIR}/state_{train_lambda}.pth'
+            PM_STATE_PATH  = f'{PM_OUTDIR}/state_{train_lambda}_{cost_weights_str}.pth'
             os.makedirs(PM_OUTDIR, exist_ok=True)
             torch.save(best_state, PM_STATE_PATH)
 

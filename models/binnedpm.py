@@ -218,6 +218,9 @@ class PairedTransformerBinned(nn.Module):
         return hist
 
 
+
+
+
 def train_epoch(model,optimizer,pair_loader, epoch,DEVICE,show_bar=True):
     model.train()
     losses = []
@@ -253,3 +256,7 @@ def eval_epoch(model,pair_loader, epoch,DEVICE,show_bar=False):
             losses.append(loss.item())
             tepoch.set_postfix(loss=f"{sum(losses) / len(losses):0.4f}")
     return sum(losses)/len(losses)
+
+
+
+
